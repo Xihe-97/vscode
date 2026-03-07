@@ -134,6 +134,7 @@ import { QuickChatService } from './widgetHosts/chatQuick.js';
 import { ChatResponseAccessibleView } from './accessibility/chatResponseAccessibleView.js';
 import { ChatTerminalOutputAccessibleView } from './accessibility/chatTerminalOutputAccessibleView.js';
 import { ChatSetupContribution, ChatTeardownContribution } from './chatSetup/chatSetupContributions.js';
+import { NailedCoreAgentContribution } from './nailedCoreAgentContribution.js';
 import { ChatStatusBarEntry } from './chatStatus/chatStatusEntry.js';
 import { ChatVariablesService } from './attachments/chatVariables.js';
 import { ChatWidget } from './widget/chatWidget.js';
@@ -1728,6 +1729,7 @@ registerWorkbenchContribution2(CodeBlockActionRendering.ID, CodeBlockActionRende
 registerWorkbenchContribution2(ChatImplicitContextContribution.ID, ChatImplicitContextContribution, WorkbenchPhase.Eventually);
 registerWorkbenchContribution2(ChatViewsWelcomeHandler.ID, ChatViewsWelcomeHandler, WorkbenchPhase.BlockStartup);
 registerWorkbenchContribution2(ChatGettingStartedContribution.ID, ChatGettingStartedContribution, WorkbenchPhase.Eventually);
+registerWorkbenchContribution2(NailedCoreAgentContribution.ID, NailedCoreAgentContribution, WorkbenchPhase.BlockStartup);
 registerWorkbenchContribution2(ChatSetupContribution.ID, ChatSetupContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatTeardownContribution.ID, ChatTeardownContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(ChatStatusBarEntry.ID, ChatStatusBarEntry, WorkbenchPhase.BlockRestore);

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { DeferredPromise } from '../../../../../base/common/async.js';
+import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
 import { BugIndicatingError, ErrorNoTelemetry } from '../../../../../base/common/errors.js';
@@ -485,14 +485,18 @@ export class ChatService extends Disposable implements IChatService {
 	async activateDefaultAgent(location: ChatAgentLocation): Promise<void> {
 		await this.extensionService.whenInstalledExtensionsRegistered();
 
-		const defaultAgentData = this.chatAgentService.getContributedDefaultAgent(location) ?? this.chatAgentService.getContributedDefaultAgent(ChatAgentLocation.Chat);
+		let defaultAgentData = this.chatAgentService.getContributedDefaultAgent(location) ?? this.chatAgentService.getContributedDefaultAgent(ChatAgentLocation.Chat);
+		if (!defaultAgentData) {
+			await Promise.race([
+				Event.toPromise(Event.filter(this.chatAgentService.onDidChangeAgents, () => Boolean(this.chatAgentService.getContributedDefaultAgent(location) ?? this.chatAgentService.getContributedDefaultAgent(ChatAgentLocation.Chat)))),
+				timeout(2000)
+			]);
+			defaultAgentData = this.chatAgentService.getContributedDefaultAgent(location) ?? this.chatAgentService.getContributedDefaultAgent(ChatAgentLocation.Chat);
+		}
 		if (!defaultAgentData) {
 			throw new ErrorNoTelemetry('No default agent contributed');
 		}
 
-		// Await activation of the extension provided agent
-		// Using `activateById` as workaround for the issue
-		// https://github.com/microsoft/vscode/issues/250590
 		if (!defaultAgentData.isCore) {
 			await this.extensionService.activateById(defaultAgentData.extensionId, {
 				activationEvent: `onChatParticipant:${defaultAgentData.id}`,
@@ -501,7 +505,14 @@ export class ChatService extends Disposable implements IChatService {
 			});
 		}
 
-		const defaultAgent = this.chatAgentService.getActivatedAgents().find(agent => agent.id === defaultAgentData.id);
+		let defaultAgent = this.chatAgentService.getActivatedAgents().find(agent => agent.id === defaultAgentData.id);
+		if (!defaultAgent) {
+			await Promise.race([
+				Event.toPromise(Event.filter(this.chatAgentService.onDidChangeAgents, () => Boolean(this.chatAgentService.getActivatedAgents().find(agent => agent.id === defaultAgentData.id)))),
+				timeout(2000)
+			]);
+			defaultAgent = this.chatAgentService.getActivatedAgents().find(agent => agent.id === defaultAgentData.id);
+		}
 		if (!defaultAgent) {
 			throw new ErrorNoTelemetry('No default agent registered');
 		}
@@ -1161,7 +1172,7 @@ export class ChatService extends Disposable implements IChatService {
 				if ((token.isCancellationRequested && !rawResult)) {
 					return;
 				} else if (!request) {
-					// Silent slash command completed successfully — allow queued
+					// Silent slash command completed successfully 鈥?allow queued
 					// requests to proceed.
 					shouldProcessPending = !token.isCancellationRequested;
 					return;

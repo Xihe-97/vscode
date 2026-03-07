@@ -50,14 +50,19 @@ export enum ChatSetupStrategy {
 	SetupWithoutEnterpriseProvider = 2,
 	SetupWithEnterpriseProvider = 3,
 	SetupWithGoogleProvider = 4,
-	SetupWithAppleProvider = 5
+	SetupWithAppleProvider = 5,
+	UseNailedProvider = 6,
 }
+
+export const CUSTOM_CHAT_PROVIDER_STORAGE_KEY = 'chat.customProviderSelection';
+export const CUSTOM_CHAT_PROVIDER_NAILED = 'nailed';
 
 export type ChatSetupResultValue = boolean /* success */ | undefined /* canceled */;
 
 export interface IChatSetupResult {
 	readonly success: ChatSetupResultValue;
 	readonly dialogSkipped: boolean;
+	readonly selectedProvider?: string;
 }
 
 export function refreshTokens(commandService: ICommandService): void {

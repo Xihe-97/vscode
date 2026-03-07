@@ -23,13 +23,14 @@ import { IKeybindingService } from '../../../../../platform/keybinding/common/ke
 import { ILayoutService } from '../../../../../platform/layout/browser/layoutService.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import product from '../../../../../platform/product/common/product.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { ITelemetryService, TelemetryLevel } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IWorkspaceTrustRequestService } from '../../../../../platform/workspace/common/workspaceTrust.js';
 import { IWorkbenchLayoutService } from '../../../../services/layout/browser/layoutService.js';
 import { ChatEntitlement, ChatEntitlementContext, ChatEntitlementService, IChatEntitlementService, isProUser } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IChatWidgetService } from '../chat.js';
 import { ChatSetupController } from './chatSetupController.js';
-import { IChatSetupResult, ChatSetupAnonymous, InstallChatEvent, InstallChatClassification, ChatSetupStrategy, ChatSetupResultValue } from './chatSetup.js';
+import { IChatSetupResult, ChatSetupAnonymous, InstallChatEvent, InstallChatClassification, ChatSetupStrategy, ChatSetupResultValue, CUSTOM_CHAT_PROVIDER_NAILED, CUSTOM_CHAT_PROVIDER_STORAGE_KEY } from './chatSetup.js';
 import { IDefaultAccountService } from '../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
 import { IWorkbenchAssignmentService } from '../../../../services/assignment/common/assignmentService.js';
@@ -51,7 +52,7 @@ export class ChatSetup {
 		let instance = ChatSetup.instance;
 		if (!instance) {
 			instance = ChatSetup.instance = instantiationService.invokeFunction(accessor => {
-				return new ChatSetup(context, controller, accessor.get(ITelemetryService), accessor.get(IWorkbenchLayoutService), accessor.get(IKeybindingService), accessor.get(IChatEntitlementService) as ChatEntitlementService, accessor.get(ILogService), accessor.get(IChatWidgetService), accessor.get(IWorkspaceTrustRequestService), accessor.get(IMarkdownRendererService), accessor.get(IDefaultAccountService), accessor.get(IHostService), accessor.get(IWorkbenchAssignmentService));
+				return new ChatSetup(context, controller, accessor.get(ITelemetryService), accessor.get(IWorkbenchLayoutService), accessor.get(IKeybindingService), accessor.get(IChatEntitlementService) as ChatEntitlementService, accessor.get(ILogService), accessor.get(IChatWidgetService), accessor.get(IWorkspaceTrustRequestService), accessor.get(IMarkdownRendererService), accessor.get(IDefaultAccountService), accessor.get(IHostService), accessor.get(IWorkbenchAssignmentService), accessor.get(IStorageService));
 			});
 		}
 
@@ -76,6 +77,7 @@ export class ChatSetup {
 		@IDefaultAccountService private readonly defaultAccountService: IDefaultAccountService,
 		@IHostService private readonly hostService: IHostService,
 		@IWorkbenchAssignmentService private readonly experimentService: IWorkbenchAssignmentService,
+		@IStorageService private readonly storageService: IStorageService,
 	) { }
 
 	skipDialog(): void {
@@ -132,6 +134,7 @@ export class ChatSetup {
 		}
 
 		let success: ChatSetupResultValue = undefined;
+		let selectedProvider: string | undefined;
 		try {
 			switch (setupStrategy) {
 				case ChatSetupStrategy.SetupWithEnterpriseProvider:
@@ -146,6 +149,11 @@ export class ChatSetup {
 				case ChatSetupStrategy.SetupWithGoogleProvider:
 					success = await this.controller.value.setupWithProvider({ useEnterpriseProvider: false, useSocialProvider: 'google', additionalScopes: options?.additionalScopes, forceAnonymous: options?.forceAnonymous });
 					break;
+				case ChatSetupStrategy.UseNailedProvider:
+					this.storageService.store(CUSTOM_CHAT_PROVIDER_STORAGE_KEY, CUSTOM_CHAT_PROVIDER_NAILED, StorageScope.APPLICATION, StorageTarget.USER);
+					selectedProvider = CUSTOM_CHAT_PROVIDER_NAILED;
+					success = true;
+					break;
 				case ChatSetupStrategy.DefaultSetup:
 					success = await this.controller.value.setup({ ...options, forceAnonymous: options?.forceAnonymous });
 					break;
@@ -159,10 +167,11 @@ export class ChatSetup {
 			success = false;
 		}
 
-		return { success, dialogSkipped };
+		return { success, dialogSkipped, selectedProvider };
 	}
 
 	private async showDialog(options?: { forceSignInDialog?: boolean; forceAnonymous?: ChatSetupAnonymous; dialogIcon?: ThemeIcon; dialogTitle?: string; dialogHideSkip?: boolean }): Promise<ChatSetupStrategy> {
+
 		const disposables = new DisposableStore();
 
 		const useCloseButton = options?.dialogHideSkip || await this.experimentService.getTreatment<boolean>('chatSetupDialogCloseButton');
@@ -206,8 +215,11 @@ export class ChatSetup {
 			const googleProviderButton: ContinueWithButton = [localize('continueWith', "Continue with {0}", defaultChat.provider.google.name), ChatSetupStrategy.SetupWithGoogleProvider, styleButton('continue-button', 'google')];
 			const appleProviderButton: ContinueWithButton = [localize('continueWith', "Continue with {0}", defaultChat.provider.apple.name), ChatSetupStrategy.SetupWithAppleProvider, styleButton('continue-button', 'apple')];
 
+			const nailedProviderButton: ContinueWithButton = ['Continue with Nailed', ChatSetupStrategy.UseNailedProvider, styleButton('continue-button', 'default')];
+
 			if (!this.defaultAccountService.getDefaultAccountAuthenticationProvider().enterprise) {
 				buttons = coalesce([
+					nailedProviderButton,
 					defaultProviderButton,
 					googleProviderButton,
 					appleProviderButton,
@@ -215,6 +227,7 @@ export class ChatSetup {
 				]);
 			} else {
 				buttons = coalesce([
+					nailedProviderButton,
 					enterpriseProviderButton,
 					googleProviderButton,
 					appleProviderButton,
