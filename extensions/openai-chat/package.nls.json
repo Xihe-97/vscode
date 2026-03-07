@@ -1,7 +1,0 @@
-{
-  "displayName": "OpenAI Chat",
-  "description": "Connects VS Code's native chat UI to the configured OpenAI-compatible provider.",
-  "provider.displayName": "Nailed",
-  "participant.name": "nailed",
-  "participant.description": "Chat with the configured Nailed provider."
-}
