@@ -438,9 +438,9 @@ export class ChatAgentService extends Disposable implements IChatAgentService {
 	private _preferExtensionAgent<T extends IChatAgentData>(agents: T[]): T | undefined {
 		// We potentially have multiple agents on the same location,
 		// contributed from core and from extensions.
-		// This method will prefer the last extensions provided agent
-		// falling back to the last core agent if no extension agent is found.
-		return findLast(agents, agent => !agent.isCore) ?? agents.at(-1);
+		// This method will prefer the last core agent (e.g., nailed.chat.core)
+		// over extension agents (e.g., setup.github).
+		return findLast(agents, agent => agent.isCore) ?? agents.at(-1);
 	}
 
 	getAgent(id: string, includeDisabled = false): IChatAgentData | undefined {
