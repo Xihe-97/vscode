@@ -4,18 +4,10 @@ cd /d "%~dp0"
 
 set "REPO=%CD%"
 set "PORTABLE_NODE=%REPO%\..\_tooling\node-v22.22.0-win-x64"
-set "EXE=%REPO%\.build\electron\Code - OSS.exe"
 
 if not exist "%PORTABLE_NODE%\node.exe" (
   echo [ERROR] Portable Node not found:
   echo   %PORTABLE_NODE%
-  pause
-  exit /b 1
-)
-
-if not exist "%EXE%" (
-  echo [ERROR] Source Code - OSS executable not found:
-  echo   %EXE%
   pause
   exit /b 1
 )
@@ -29,10 +21,13 @@ set "VCINSTALLDIR=D:\Microsoft Visual Studio\18\BuildTools\VC\"
 set "VSCMD_VER=17.14.0"
 set "WindowsSDKVersion=10.0.26100.0\"
 set "ELECTRON_RUN_AS_NODE="
-set "VSCODE_SKIP_PRELAUNCH=1"
+
+echo [VSCode Dev] Starting incremental watch...
+echo [VSCode Dev] Keep this window open while editing source files.
+echo [VSCode Dev] After changes compile, use "Developer: Reload Window" in the source Code - OSS window.
+echo.
 
 pushd V:\
-echo [VSCode Dev] Fast start (no repair)...
-start "" "%EXE%" .
+"%PORTABLE_NODE%\node.exe" "%PORTABLE_NODE%\node_modules\npm\bin\npm-cli.js" run watch
 popd
-exit /b 0
+exit /b %ERRORLEVEL%
