@@ -191,6 +191,13 @@ class NailedCoreAgent extends Disposable implements IChatAgentImplementation {
 			: promptableTools;
 
 		this.logService.debug(`${this.logPrefix(request)} Tool selection resolved { selectedModel: ${selectedModel?.id ?? 'none'}, promptable: ${promptableTools.length}, exposed: ${filteredTools.length}, toolIds: [${filteredTools.map(tool => tool.id).join(', ')}], disabledByUser: [${disabledByUser.join(', ')}] }`);
+		this.logService.info(`${this.logPrefix(request)} Exposed tool details ${JSON.stringify(filteredTools.map(tool => ({
+			id: tool.id,
+			displayName: tool.displayName,
+			canBeReferencedInPrompt: tool.canBeReferencedInPrompt,
+			modelDescription: tool.modelDescription,
+			source: typeof tool.source === 'string' ? tool.source : tool.source?.type,
+		})))}`);
 		return filteredTools;
 	}
 
