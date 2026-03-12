@@ -3106,6 +3106,46 @@ suite('LanguageModelToolsService', () => {
 		assert.strictEqual(result.content[0].value, 'correlated result');
 	});
 
+	test('invokeTool correlates with pending streaming call after updateToolStream', async () => {
+		let receivedRawInput: unknown;
+		const tool = registerToolForTest(service, store, 'correlatedToolWithStreamingInput', {
+			invoke: async () => ({ content: [{ kind: 'text', value: 'correlated streaming result' }] }),
+			handleToolStream: async context => {
+				receivedRawInput = context.rawInput;
+				return { invocationMessage: 'Streaming...' };
+			},
+		});
+
+		const sessionId = 'correlated-streaming-session';
+		const requestId = 'correlated-streaming-request';
+		stubGetSession(chatService, sessionId, { requestId });
+
+		const streamingInvocation = service.beginToolCall({
+			toolCallId: 'streaming-call-id',
+			toolId: tool.id,
+			chatRequestId: requestId,
+			sessionResource: LocalChatSessionUri.forSession(sessionId),
+		});
+
+		assert.ok(streamingInvocation, 'should create streaming invocation');
+		await service.updateToolStream('streaming-call-id', { path: 'src/index.ts' }, CancellationToken.None);
+
+		const dto: IToolInvocation = {
+			callId: 'protocol-call-id',
+			toolId: tool.id,
+			tokenBudget: 100,
+			parameters: { path: 'src/index.ts' },
+			context: {
+				sessionResource: LocalChatSessionUri.forSession(sessionId),
+			},
+			chatStreamToolCallId: 'streaming-call-id',
+		};
+
+		const result = await service.invokeTool(dto, async () => 0, CancellationToken.None);
+		assert.deepStrictEqual(receivedRawInput, { path: 'src/index.ts' });
+		assert.strictEqual(result.content[0].value, 'correlated streaming result');
+	});
+
 	test('getAllToolsIncludingDisabled returns tools regardless of when clause', () => {
 		contextKeyService.createKey('featureFlag', false);
 

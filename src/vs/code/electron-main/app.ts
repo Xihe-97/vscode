@@ -69,6 +69,8 @@ import { METERED_CONNECTION_CHANNEL } from '../../platform/meteredConnection/com
 import { MeteredConnectionChannel } from '../../platform/meteredConnection/electron-main/meteredConnectionChannel.js';
 import { MeteredConnectionMainService } from '../../platform/meteredConnection/electron-main/meteredConnectionMainService.js';
 import { IProductService } from '../../platform/product/common/productService.js';
+import { IRequestService } from '../../platform/request/common/request.js';
+import { RequestChannel } from '../../platform/request/common/requestIpc.js';
 import { getRemoteAuthority } from '../../platform/remote/common/remoteHosts.js';
 import { SharedProcess } from '../../platform/sharedProcess/electron-main/sharedProcess.js';
 import { ISignService } from '../../platform/sign/common/sign.js';
@@ -1214,6 +1216,10 @@ export class CodeApplication extends Disposable {
 		// Process
 		const processChannel = ProxyChannel.fromService(new ProcessMainService(this.logService, accessor.get(IDiagnosticsService), accessor.get(IDiagnosticsMainService)), disposables);
 		mainProcessElectronServer.registerChannel('process', processChannel);
+
+		// Request
+		const requestChannel = new RequestChannel(accessor.get(IRequestService));
+		mainProcessElectronServer.registerChannel('request', requestChannel);
 
 		// Encryption
 		const encryptionChannel = ProxyChannel.fromService(accessor.get(IEncryptionMainService), disposables);
