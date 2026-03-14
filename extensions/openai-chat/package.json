@@ -1,0 +1,50 @@
+{
+  "name": "openai-chat",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.0.1",
+  "publisher": "vscode",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/microsoft/vscode.git"
+  },
+  "private": true,
+  "main": "./out/extension",
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "enabledApiProposals": [
+    "chatProvider",
+    "defaultChatParticipant"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "nailed",
+        "displayName": "Nailed"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "nailed.chat",
+        "name": "nailed",
+        "fullName": "Nailed",
+        "description": "Chat with the configured Nailed provider.",
+        "isDefault": true,
+        "modes": [
+          "ask",
+          "agent"
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "node ../../node_modules/typescript/lib/tsc.js -p ./tsconfig.json",
+    "watch": "node ../../node_modules/typescript/lib/tsc.js -p ./tsconfig.json --watch",
+    "vscode:prepublish": "node ../../node_modules/typescript/lib/tsc.js -p ./tsconfig.json"
+  }
+}

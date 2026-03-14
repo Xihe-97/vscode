@@ -12,17 +12,13 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Lazy } from '../../../../../base/common/lazy.js';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
-import { env } from '../../../../../base/common/process.js';
+import { basename } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
-import { IMainProcessService } from '../../../../../platform/ipc/common/mainProcessService.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
-import { IFileService } from '../../../../../platform/files/common/files.js';
 import product from '../../../../../platform/product/common/product.js';
-import { IRequestService } from '../../../../../platform/request/common/request.js';
-import { RequestChannelClient } from '../../../../../platform/request/common/requestIpc.js';
 import { IStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IWorkspaceTrustManagementService } from '../../../../../platform/workspace/common/workspaceTrust.js';
@@ -37,12 +33,13 @@ import { ChatRequestAgentPart, ChatRequestToolPart } from '../../common/requestP
 import { IChatProgress, IChatService } from '../../common/chatService/chatService.js';
 import { IChatRequestToolEntry } from '../../common/attachments/chatVariableEntries.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../common/constants.js';
-import { ILanguageModelsService } from '../../common/languageModels.js';
+import { ChatMessageRole, getTextResponseFromStream, IChatMessage, ILanguageModelsService } from '../../common/languageModels.js';
 import { CHAT_OPEN_ACTION_ID, CHAT_SETUP_ACTION_ID } from '../actions/chatActions.js';
 import { ChatViewId, IChatWidgetService } from '../chat.js';
 import { IViewsService } from '../../../../services/views/common/viewsService.js';
 import { ChatViewPane } from '../widgetHosts/viewPane/chatViewPane.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
+import { ITextModelService } from '../../../../../editor/common/services/resolverService.js';
 import { CodeAction, CodeActionList, Command, NewSymbolName, NewSymbolNameTriggerKind } from '../../../../../editor/common/languages.js';
 import { ITextModel } from '../../../../../editor/common/model.js';
 import { IRange, Range } from '../../../../../editor/common/core/range.js';
@@ -56,7 +53,6 @@ import { ChatSetupController } from './chatSetupController.js';
 import { ChatSetupAnonymous, ChatSetupStep, IChatSetupResult, maybeEnableAuthExtension, refreshTokens, CUSTOM_CHAT_PROVIDER_NAILED, CUSTOM_CHAT_PROVIDER_STORAGE_KEY } from './chatSetup.js';
 import { ChatSetup } from './chatSetupRunner.js';
 import { chatViewsWelcomeRegistry } from '../viewsWelcome/chatViewsWelcome.js';
-import { invokeNailedRequest } from '../nailedCoreAgentContribution.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IDefaultAccountService } from '../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
@@ -75,6 +71,9 @@ const ToolsAgentContextKey = ContextKeyExpr.and(
 	ContextKeyExpr.equals(`config.${ChatConfiguration.AgentEnabled}`, true),
 	ContextKeyExpr.not(`previewFeaturesDisabled`) // Set by extension
 );
+const MAX_NAILED_CONTEXT_ENTRIES = 12;
+const MAX_NAILED_CONTEXT_CHARS = 12000;
+const LOCATION_CONTEXT_PADDING = 20;
 
 export class SetupAgent extends Disposable implements IChatAgentImplementation {
 
@@ -207,6 +206,7 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 		@IOutputService private readonly outputService: IOutputService,
 		@IExtensionsWorkbenchService private readonly extensionsWorkbenchService: IExtensionsWorkbenchService,
 		@ICommandService private readonly commandService: ICommandService,
+		@ITextModelService private readonly textModelService: ITextModelService,
 	) {
 		super();
 
@@ -250,58 +250,24 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 
 	async invoke(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, history: IChatAgentHistoryEntry[], token: CancellationToken): Promise<IChatAgentResult> {
 		return this.instantiationService.invokeFunction(async accessor /* using accessor for lazy loading */ => {
-			const fileService = accessor.get(IFileService);
 			const chatService = accessor.get(IChatService);
 			const languageModelsService = accessor.get(ILanguageModelsService);
 			const chatWidgetService = accessor.get(IChatWidgetService);
 			const chatAgentService = accessor.get(IChatAgentService);
 			const languageModelToolsService = accessor.get(ILanguageModelToolsService);
 			const defaultAccountService = accessor.get(IDefaultAccountService);
-			let requestService: IRequestService | undefined;
-			try {
-				requestService = new RequestChannelClient(accessor.get(IMainProcessService).getChannel('request'));
-			} catch {
-				requestService = undefined;
-			}
 			const storageService = accessor.get(IStorageService);
-			const directResult = await this.tryInvokeNailedProvider(request, progress, history, token, fileService, storageService, languageModelToolsService, languageModelsService, requestService);
-			if (directResult) {
-				const title = chatService.getSessionTitle(request.sessionResource) || request.message.trim();
-				await chatService.setChatSessionTitle(request.sessionResource, title);
-				return directResult;
-			}
 
-			return this.doInvoke(request, part => progress([part]), chatService, languageModelsService, chatWidgetService, chatAgentService, languageModelToolsService, defaultAccountService, fileService, storageService, requestService);
+			return this.doInvoke(request, part => progress([part]), history, token, chatService, languageModelsService, chatWidgetService, chatAgentService, languageModelToolsService, defaultAccountService, storageService);
 		});
 	}
 
-	private async tryInvokeNailedProvider(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, history: IChatAgentHistoryEntry[], token: CancellationToken, fileService: IFileService, storageService: IStorageService, languageModelToolsService: ILanguageModelToolsService, languageModelsService: ILanguageModelsService, requestService?: IRequestService): Promise<IChatAgentResult | undefined> {
-		if (storageService.get(CUSTOM_CHAT_PROVIDER_STORAGE_KEY, StorageScope.APPLICATION) != CUSTOM_CHAT_PROVIDER_NAILED) {
-			return undefined;
+	private async doInvoke(request: IChatAgentRequest, progress: (part: IChatProgress) => void, history: IChatAgentHistoryEntry[], token: CancellationToken, chatService: IChatService, languageModelsService: ILanguageModelsService, chatWidgetService: IChatWidgetService, chatAgentService: IChatAgentService, languageModelToolsService: ILanguageModelToolsService, defaultAccountService: IDefaultAccountService, storageService: IStorageService): Promise<IChatAgentResult> {
+		if (this.shouldBypassSetupForNailed(request, languageModelsService, storageService)) {
+			await this.primeNailedLanguageModels(languageModelsService);
+			return this.invokeNailedViaLanguageModelService(request, history, progress, languageModelsService, token);
 		}
 
-		const homePath = env['USERPROFILE'] || env['HOME'];
-		if (!homePath) {
-			return undefined;
-		}
-
-		const configUri = URI.joinPath(URI.file(homePath), '.codex', 'config.toml');
-
-		let configRaw: string;
-		try {
-			configRaw = (await fileService.readFile(configUri)).value.toString();
-		} catch {
-			return undefined;
-		}
-
-		if (!/^model_provider\s*=\s*"nailed"/m.test(configRaw)) {
-			return undefined;
-		}
-
-		return invokeNailedRequest(request, progress, history, token, fileService, this.logService, languageModelToolsService, languageModelsService, requestService);
-	}
-
-	private async doInvoke(request: IChatAgentRequest, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatWidgetService: IChatWidgetService, chatAgentService: IChatAgentService, languageModelToolsService: ILanguageModelToolsService, defaultAccountService: IDefaultAccountService, fileService: IFileService, storageService: IStorageService, requestService?: IRequestService): Promise<IChatAgentResult> {
 		if (
 			!this.context.state.installed ||									// Extension not installed: run setup to install
 			this.context.state.disabled ||										// Extension disabled: run setup to enable
@@ -312,10 +278,251 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 				!this.chatEntitlementService.anonymous							// unless anonymous access is enabled
 			)
 		) {
-			return this.doInvokeWithSetup(request, progress, chatService, languageModelsService, chatWidgetService, chatAgentService, languageModelToolsService, defaultAccountService, fileService, storageService, requestService);
+			return this.doInvokeWithSetup(request, progress, chatService, languageModelsService, chatWidgetService, chatAgentService, languageModelToolsService, defaultAccountService);
 		}
 
 		return this.doInvokeWithoutSetup(request, progress, chatService, languageModelsService, chatWidgetService, chatAgentService, languageModelToolsService);
+	}
+
+	private shouldBypassSetupForNailed(request: IChatAgentRequest, languageModelsService: ILanguageModelsService, storageService: IStorageService): boolean {
+		const selectedCustomProvider = storageService.get(CUSTOM_CHAT_PROVIDER_STORAGE_KEY, StorageScope.APPLICATION) === CUSTOM_CHAT_PROVIDER_NAILED;
+		if (selectedCustomProvider) {
+			return true;
+		}
+
+		if (request.userSelectedModelId) {
+			const selectedModel = languageModelsService.lookupLanguageModel(request.userSelectedModelId);
+			if (selectedModel?.vendor === CUSTOM_CHAT_PROVIDER_NAILED) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private async primeNailedLanguageModels(languageModelsService: ILanguageModelsService): Promise<void> {
+		try {
+			await languageModelsService.selectLanguageModels({ vendor: CUSTOM_CHAT_PROVIDER_NAILED });
+		} catch (error) {
+			this.logService.warn('[chat setup] Failed to prewarm Nailed language models', error);
+		}
+	}
+
+	private async invokeNailedViaLanguageModelService(request: IChatAgentRequest, history: IChatAgentHistoryEntry[], progress: (part: IChatProgress) => void, languageModelsService: ILanguageModelsService, token: CancellationToken): Promise<IChatAgentResult> {
+		progress({
+			kind: 'progressMessage',
+			content: new MarkdownString(localize('nailedModelServiceConnect', 'Connecting to Nailed...')),
+			shimmer: true,
+		});
+
+		const modelId = await this.resolveNailedModelId(request, languageModelsService);
+		if (!modelId) {
+			return {
+				errorDetails: {
+					message: localize('nailedModelUnavailable', 'The configured Nailed model is unavailable.'),
+				}
+			};
+		}
+
+		try {
+			const messages = await this.buildNailedMessages(request, history);
+			const response = await languageModelsService.sendChatRequest(modelId, undefined, messages, {}, token);
+			const text = (await getTextResponseFromStream(response)).trim();
+			if (!text) {
+				return {
+					errorDetails: {
+						message: localize('nailedEmptyResponse', 'The configured provider returned an empty response.'),
+					}
+				};
+			}
+
+			progress({
+				kind: 'markdownContent',
+				content: new MarkdownString(text),
+			});
+
+			return {
+				metadata: {
+					provider: 'nailed',
+					model: modelId,
+				}
+			};
+		} catch (error) {
+			this.logService.error('[nailed] language model invoke failed', error);
+			return {
+				errorDetails: {
+					message: error instanceof Error ? error.message : localize('nailedProviderFailed', 'The configured provider request failed.'),
+				}
+			};
+		}
+	}
+
+	private async resolveNailedModelId(request: IChatAgentRequest, languageModelsService: ILanguageModelsService): Promise<string | undefined> {
+		if (request.userSelectedModelId) {
+			const selectedModel = languageModelsService.lookupLanguageModel(request.userSelectedModelId);
+			if (selectedModel?.vendor === CUSTOM_CHAT_PROVIDER_NAILED) {
+				return request.userSelectedModelId;
+			}
+		}
+
+		const modelIds = await languageModelsService.selectLanguageModels({ vendor: CUSTOM_CHAT_PROVIDER_NAILED });
+		return modelIds[0];
+	}
+
+	private async buildNailedMessages(request: IChatAgentRequest, history: IChatAgentHistoryEntry[]): Promise<IChatMessage[]> {
+		const messages: IChatMessage[] = [];
+
+		const modeInstructions = request.modeInstructions?.content?.trim();
+		if (modeInstructions) {
+			messages.push({
+				role: ChatMessageRole.System,
+				content: [{ type: 'text', value: modeInstructions }],
+			});
+		}
+
+		for (const entry of history) {
+			const userPrompt = await this.buildNailedPrompt(entry.request.message, entry.request.variables);
+			if (userPrompt) {
+				messages.push({
+					role: ChatMessageRole.User,
+					content: [{ type: 'text', value: userPrompt }],
+				});
+			}
+
+			const assistantText = this.extractHistoryText(entry.response);
+			if (assistantText) {
+				messages.push({
+					role: ChatMessageRole.Assistant,
+					content: [{ type: 'text', value: assistantText }],
+				});
+			}
+		}
+
+		messages.push({
+			role: ChatMessageRole.User,
+			content: [{ type: 'text', value: await this.buildNailedPrompt(request.message, request.variables) }],
+		});
+
+		return messages;
+	}
+
+	private async buildNailedPrompt(message: string, variableData: IChatRequestVariableData): Promise<string> {
+		const sections: string[] = [];
+		const trimmedMessage = message.trim();
+		if (trimmedMessage) {
+			sections.push(trimmedMessage);
+		}
+
+		const attachedToolNames = variableData.variables
+			.filter(variable => variable.kind === 'tool' || variable.kind === 'toolset')
+			.flatMap(variable => variable.kind === 'tool' ? [variable.name] : variable.value.map(tool => tool.name));
+		if (attachedToolNames.length) {
+			sections.push(['Attached tools:', ...attachedToolNames.map(name => `- ${name}`)].join('\n'));
+		}
+
+		const renderedVariables = await Promise.all(
+			variableData.variables
+				.filter(variable => variable.kind !== 'tool' && variable.kind !== 'toolset')
+				.slice(0, MAX_NAILED_CONTEXT_ENTRIES)
+				.map(variable => this.renderNailedVariable(variable))
+		);
+		const visibleVariables = renderedVariables.filter((value): value is string => !!value);
+		if (visibleVariables.length) {
+			sections.push(['Attached context from VS Code:', ...visibleVariables].join('\n\n'));
+		}
+
+		return sections.join('\n\n');
+	}
+
+	private async renderNailedVariable(variable: IChatRequestVariableData['variables'][number]): Promise<string | undefined> {
+		const lines = [`Reference: ${variable.name}`];
+		if (variable.modelDescription) {
+			lines.push(`Description: ${variable.modelDescription}`);
+		}
+
+		if (typeof variable.value === 'string') {
+			lines.push(this.formatNailedContent(variable.value));
+			return lines.join('\n');
+		}
+
+		if (URI.isUri(variable.value)) {
+			lines.push(await this.renderUriVariable(variable.value));
+			return lines.join('\n');
+		}
+
+		if (isLocationLike(variable.value)) {
+			lines.push(await this.renderLocationVariable(variable.value.uri, variable.value.range));
+			return lines.join('\n');
+		}
+
+		return lines.join('\n');
+	}
+
+	private async renderUriVariable(resource: URI): Promise<string> {
+		try {
+			const modelRef = await this.textModelService.createModelReference(resource);
+			try {
+				const model = modelRef.object.textEditorModel;
+				return [`File: ${resource.toString()}`, this.formatNailedContent(model.getValue(), model.getLanguageId())].join('\n');
+			} finally {
+				modelRef.dispose();
+			}
+		} catch {
+			return `Resource: ${resource.toString()}`;
+		}
+	}
+
+	private async renderLocationVariable(resource: URI, range: IRange): Promise<string> {
+		try {
+			const modelRef = await this.textModelService.createModelReference(resource);
+			try {
+				const model = modelRef.object.textEditorModel;
+				const startLine = Math.max(1, range.startLineNumber - LOCATION_CONTEXT_PADDING);
+				const endLine = Math.min(model.getLineCount(), range.endLineNumber + LOCATION_CONTEXT_PADDING);
+				const snippetRange = {
+					startLineNumber: startLine,
+					startColumn: 1,
+					endLineNumber: endLine,
+					endColumn: model.getLineMaxColumn(endLine),
+				};
+				return [
+					`Location: ${resource.toString()}#${range.startLineNumber}:${range.startColumn}-${range.endLineNumber}:${range.endColumn}`,
+					this.formatNailedContent(model.getValueInRange(snippetRange), model.getLanguageId()),
+				].join('\n');
+			} finally {
+				modelRef.dispose();
+			}
+		} catch {
+			return `Location: ${resource.toString()}#${range.startLineNumber}:${range.startColumn}-${range.endLineNumber}:${range.endColumn}`;
+		}
+	}
+
+	private formatNailedContent(content: string, languageId?: string): string {
+		const trimmed = content.trim();
+		if (!trimmed) {
+			return 'Content: (empty)';
+		}
+
+		const languageSuffix = languageId && languageId !== 'plaintext' ? ` (${languageId})` : '';
+		const shortened = trimmed.length > MAX_NAILED_CONTEXT_CHARS
+			? `${trimmed.slice(0, MAX_NAILED_CONTEXT_CHARS)}\n[Truncated after ${MAX_NAILED_CONTEXT_CHARS} characters]`
+			: trimmed;
+		return `Content${languageSuffix}:\n<<<context\n${shortened}\n>>>`;
+	}
+
+	private extractHistoryText(response: IChatAgentHistoryEntry['response']): string {
+		return response.map(part => {
+			switch (part.kind) {
+				case 'markdownContent':
+					return part.content.value;
+				case 'progressMessage':
+					return part.content.value;
+				case 'warning':
+					return part.content.value;
+				default:
+					return '';
+			}
+		}).filter(value => !!value).join('\n\n').trim();
 	}
 
 	private async doInvokeWithoutSetup(request: IChatAgentRequest, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatWidgetService: IChatWidgetService, chatAgentService: IChatAgentService, languageModelToolsService: ILanguageModelToolsService): Promise<IChatAgentResult> {
@@ -687,7 +894,7 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 		}
 	}
 
-	private async doInvokeWithSetup(request: IChatAgentRequest, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatWidgetService: IChatWidgetService, chatAgentService: IChatAgentService, languageModelToolsService: ILanguageModelToolsService, defaultAccountService: IDefaultAccountService, fileService: IFileService, storageService: IStorageService, requestService?: IRequestService): Promise<IChatAgentResult> {
+	private async doInvokeWithSetup(request: IChatAgentRequest, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatWidgetService: IChatWidgetService, chatAgentService: IChatAgentService, languageModelToolsService: ILanguageModelToolsService, defaultAccountService: IDefaultAccountService): Promise<IChatAgentResult> {
 		this.telemetryService.publicLog2<WorkbenchActionExecutedEvent, WorkbenchActionExecutedClassification>('workbenchActionExecuted', { id: CHAT_SETUP_ACTION_ID, from: 'chat' });
 
 		const widget = chatWidgetService.getWidgetBySessionResource(request.sessionResource);
@@ -727,12 +934,6 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 		// User has agreed to run the setup
 		if (typeof result?.success === 'boolean') {
 			if (result.success) {
-				if (result.selectedProvider === CUSTOM_CHAT_PROVIDER_NAILED) {
-					const directResult = await this.tryInvokeNailedProvider(request, parts => { for (const part of parts) { progress(part); } }, [], CancellationToken.None, fileService, storageService, languageModelToolsService, languageModelsService, requestService);
-					if (directResult) {
-						return directResult;
-					}
-				}
 				if (result.dialogSkipped) {
 					await widget?.clear(); // make room for the Chat welcome experience
 				} else if (requestModel) {
@@ -1048,4 +1249,12 @@ export class AICodeActionsHelper {
 			]
 		};
 	}
+}
+
+function isLocationLike(value: unknown): value is { uri: URI; range: IRange } {
+	return typeof value === 'object'
+		&& value !== null
+		&& 'uri' in value
+		&& 'range' in value
+		&& URI.isUri((value as { uri: unknown }).uri);
 }
