@@ -16,6 +16,8 @@ export interface ProviderConfig {
 	readonly maxInputTokens: number;
 }
 
+export const NAILED_VENDOR = 'nailed';
+
 const CODEX_HOME = path.join(os.homedir(), '.codex');
 const CONFIG_PATH = path.join(CODEX_HOME, 'config.toml');
 const AUTH_PATH = path.join(CODEX_HOME, 'auth.json');
@@ -39,7 +41,7 @@ export async function loadProviderConfig(): Promise<ProviderConfig> {
 
 	return {
 		providerName,
-		vendor: providerName,
+		vendor: NAILED_VENDOR,
 		model,
 		baseUrl: baseUrl.replace(/\/$/, ''),
 		apiKey,

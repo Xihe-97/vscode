@@ -1,4 +1,4 @@
-﻿/*---------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
@@ -11,9 +11,15 @@ interface ResponsesInputTextPart {
 	text: string;
 }
 
+interface ResponsesInputImagePart {
+	type: 'input_image';
+	image_url: string;
+	detail?: 'auto';
+}
+
 interface ResponsesInputMessage {
 	role: 'system' | 'user' | 'assistant';
-	content: ResponsesInputTextPart[];
+	content: Array<ResponsesInputTextPart | ResponsesInputImagePart>;
 }
 
 interface ResponsesFunctionCallInput {
@@ -65,7 +71,7 @@ interface ResponsesResult {
 
 export class NailedResponsesTransport {
 
-	constructor(private readonly config: ProviderConfig) { }
+	constructor(private readonly getConfig: () => Promise<ProviderConfig>) { }
 
 	async provideChatResponse(
 		messages: readonly vscode.LanguageModelChatRequestMessage[],
@@ -86,18 +92,19 @@ export class NailedResponsesTransport {
 		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
 		token: vscode.CancellationToken,
 	): Promise<void> {
+		const config = await this.getConfig();
 		const controller = new AbortController();
 		const cancellationListener = token.onCancellationRequested(() => controller.abort());
 		try {
-			const response = await fetch(`${this.config.baseUrl}/responses`, {
+			const response = await fetch(`${config.baseUrl}/responses`, {
 				method: 'POST',
 				headers: {
-					'Authorization': `Bearer ${this.config.apiKey}`,
+					'Authorization': `Bearer ${config.apiKey}`,
 					'Content-Type': 'application/json',
 					'Accept': 'text/event-stream',
 				},
 				body: JSON.stringify({
-					model: this.config.model,
+					model: config.model,
 					input: toResponsesInput(messages),
 					stream: true,
 				}),
@@ -145,17 +152,18 @@ export class NailedResponsesTransport {
 		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
 		token: vscode.CancellationToken,
 	): Promise<void> {
+		const config = await this.getConfig();
 		const controller = new AbortController();
 		const cancellationListener = token.onCancellationRequested(() => controller.abort());
 		try {
-			const response = await fetch(`${this.config.baseUrl}/responses`, {
+			const response = await fetch(`${config.baseUrl}/responses`, {
 				method: 'POST',
 				headers: {
-					'Authorization': `Bearer ${this.config.apiKey}`,
+					'Authorization': `Bearer ${config.apiKey}`,
 					'Content-Type': 'application/json',
 				},
 				body: JSON.stringify({
-					model: this.config.model,
+					model: config.model,
 					input: toResponsesInput(messages),
 					tools: options.tools?.length ? options.tools.map(toResponsesTool) : undefined,
 					tool_choice: options.tools?.length ? toResponsesToolChoice(options.toolMode) : undefined,
@@ -240,11 +248,11 @@ function toResponsesInput(messages: readonly vscode.LanguageModelChatRequestMess
 	const input: ResponsesInputItem[] = [];
 
 	for (const message of messages) {
-		const textContent = toResponsesTextContent(message.role, message.content);
-		if (textContent.length) {
+		const messageContent = toResponsesMessageContent(message.role, message.content);
+		if (messageContent.length) {
 			input.push({
 				role: toResponsesRole(message.role),
-				content: textContent,
+				content: messageContent,
 			});
 		}
 
@@ -284,8 +292,11 @@ function toResponsesRole(role: vscode.LanguageModelChatMessageRole): 'system' | 
 	return 'user';
 }
 
-function toResponsesTextContent(role: vscode.LanguageModelChatMessageRole, content: readonly (vscode.LanguageModelInputPart | unknown)[]): ResponsesInputTextPart[] {
-	const parts: ResponsesInputTextPart[] = [];
+function toResponsesMessageContent(
+	role: vscode.LanguageModelChatMessageRole,
+	content: readonly (vscode.LanguageModelInputPart | unknown)[],
+): Array<ResponsesInputTextPart | ResponsesInputImagePart> {
+	const parts: Array<ResponsesInputTextPart | ResponsesInputImagePart> = [];
 	const textType: ResponsesInputTextPart['type'] = role === vscode.LanguageModelChatMessageRole.Assistant ? 'output_text' : 'input_text';
 	for (const part of content) {
 		if (part instanceof vscode.LanguageModelTextPart) {
@@ -296,6 +307,12 @@ function toResponsesTextContent(role: vscode.LanguageModelChatMessageRole, conte
 		}
 
 		if (part instanceof vscode.LanguageModelDataPart) {
+			const imagePart = dataPartToInputImage(part);
+			if (imagePart) {
+				parts.push(imagePart);
+				continue;
+			}
+
 			const text = dataPartToText(part);
 			if (text.trim()) {
 				parts.push({ type: textType, text });
@@ -355,13 +372,33 @@ function serializeToolResultPart(part: unknown): string {
 	}
 }
 
+function dataPartToInputImage(part: vscode.LanguageModelDataPart): ResponsesInputImagePart | undefined {
+	if (!isImageMimeType(part.mimeType)) {
+		return undefined;
+	}
+
+	return {
+		type: 'input_image',
+		image_url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString('base64')}`,
+		detail: 'auto',
+	};
+}
+
 function dataPartToText(part: vscode.LanguageModelDataPart): string {
 	const mimeType = part.mimeType.toLowerCase();
 	if (mimeType.startsWith('text/') || mimeType.includes('json') || mimeType.includes('xml')) {
 		return new TextDecoder().decode(part.data);
 	}
 
+	if (isImageMimeType(mimeType)) {
+		return `[${part.mimeType} image attachment]`;
+	}
+
 	return `[${part.mimeType} data omitted]`;
+}
+
+function isImageMimeType(mimeType: string): boolean {
+	return mimeType.toLowerCase().startsWith('image/');
 }
 
 async function toLanguageModelError(response: Response): Promise<Error> {

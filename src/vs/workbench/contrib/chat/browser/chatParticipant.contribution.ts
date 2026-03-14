@@ -199,6 +199,61 @@ const chatParticipantExtensionPoint = extensionsRegistry.ExtensionsRegistry.regi
 						}
 					}
 				},
+				capabilities: {
+					description: localize('chatParticipantCapabilities', 'Optional attachment capabilities for this chat participant.'),
+					type: 'object',
+					additionalProperties: false,
+					properties: {
+						supportsFileAttachments: {
+							description: localize('chatParticipantSupportsFileAttachments', 'Whether this chat participant supports attaching files or file references.'),
+							type: 'boolean'
+						},
+						supportsToolAttachments: {
+							description: localize('chatParticipantSupportsToolAttachments', 'Whether this chat participant supports attaching tools or tool references.'),
+							type: 'boolean'
+						},
+						supportsMCPAttachments: {
+							description: localize('chatParticipantSupportsMCPAttachments', 'Whether this chat participant supports attaching MCP resources.'),
+							type: 'boolean'
+						},
+						supportsImageAttachments: {
+							description: localize('chatParticipantSupportsImageAttachments', 'Whether this chat participant supports attaching images.'),
+							type: 'boolean'
+						},
+						supportsSearchResultAttachments: {
+							description: localize('chatParticipantSupportsSearchResultAttachments', 'Whether this chat participant supports attaching search results.'),
+							type: 'boolean'
+						},
+						supportsInstructionAttachments: {
+							description: localize('chatParticipantSupportsInstructionAttachments', 'Whether this chat participant supports attaching instructions.'),
+							type: 'boolean'
+						},
+						supportsSourceControlAttachments: {
+							description: localize('chatParticipantSupportsSourceControlAttachments', 'Whether this chat participant supports attaching source control changes.'),
+							type: 'boolean'
+						},
+						supportsProblemAttachments: {
+							description: localize('chatParticipantSupportsProblemAttachments', 'Whether this chat participant supports attaching problems.'),
+							type: 'boolean'
+						},
+						supportsSymbolAttachments: {
+							description: localize('chatParticipantSupportsSymbolAttachments', 'Whether this chat participant supports attaching symbols.'),
+							type: 'boolean'
+						},
+						supportsTerminalAttachments: {
+							description: localize('chatParticipantSupportsTerminalAttachments', 'Whether this chat participant supports attaching terminals.'),
+							type: 'boolean'
+						},
+						supportsPromptAttachments: {
+							description: localize('chatParticipantSupportsPromptAttachments', 'Whether this chat participant supports attaching prompts.'),
+							type: 'boolean'
+						},
+						supportsHandOffs: {
+							description: localize('chatParticipantSupportsHandOffs', 'Whether this chat participant supports hand offs.'),
+							type: 'boolean'
+						}
+					}
+				},
 			}
 		}
 	},
@@ -275,7 +330,7 @@ export class ChatExtensionPointHandler implements IWorkbenchContribution {
 							{
 								extensionId: extension.description.identifier,
 								extensionVersion: extension.description.version,
-								publisherDisplayName: extension.description.publisherDisplayName ?? extension.description.publisher, // May not be present in OSS
+								publisherDisplayName: extension.description.publisherDisplayName ?? extension.description.publisher,
 								extensionPublisherId: extension.description.publisher,
 								extensionDisplayName: extension.description.displayName ?? extension.description.name,
 								id: providerDescriptor.id,
@@ -293,6 +348,7 @@ export class ChatExtensionPointHandler implements IWorkbenchContribution {
 									[ChatAgentLocation.Chat],
 								modes: providerDescriptor.isDefault ? (providerDescriptor.modes ?? [ChatModeKind.Ask]) : [ChatModeKind.Agent, ChatModeKind.Ask, ChatModeKind.Edit],
 								slashCommands: providerDescriptor.commands ?? [],
+								capabilities: providerDescriptor.capabilities,
 								disambiguation: coalesce(participantsDisambiguation.flat()),
 							} satisfies IChatAgentData));
 

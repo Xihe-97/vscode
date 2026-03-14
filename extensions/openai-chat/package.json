@@ -16,7 +16,10 @@
   },
   "enabledApiProposals": [
     "chatProvider",
-    "defaultChatParticipant"
+    "defaultChatParticipant",
+    "chatParticipantAdditions",
+    "chatParticipantPrivate",
+    "chatReferenceBinaryData"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -38,7 +41,20 @@
         "modes": [
           "ask",
           "agent"
-        ]
+        ],
+        "capabilities": {
+          "supportsFileAttachments": true,
+          "supportsToolAttachments": true,
+          "supportsMCPAttachments": true,
+          "supportsImageAttachments": true,
+          "supportsSearchResultAttachments": true,
+          "supportsInstructionAttachments": true,
+          "supportsSourceControlAttachments": true,
+          "supportsProblemAttachments": true,
+          "supportsSymbolAttachments": true,
+          "supportsTerminalAttachments": true,
+          "supportsPromptAttachments": true
+        }
       }
     ]
   },

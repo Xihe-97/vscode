@@ -14,6 +14,21 @@ export interface IRawChatCommandContribution {
 	disambiguation?: { category: string; categoryName?: string /** Deprecated */; description: string; examples: string[] }[];
 }
 
+export interface IRawChatAttachmentCapabilitiesContribution {
+	supportsFileAttachments?: boolean;
+	supportsToolAttachments?: boolean;
+	supportsMCPAttachments?: boolean;
+	supportsImageAttachments?: boolean;
+	supportsSearchResultAttachments?: boolean;
+	supportsInstructionAttachments?: boolean;
+	supportsSourceControlAttachments?: boolean;
+	supportsProblemAttachments?: boolean;
+	supportsSymbolAttachments?: boolean;
+	supportsTerminalAttachments?: boolean;
+	supportsPromptAttachments?: boolean;
+	supportsHandOffs?: boolean;
+}
+
 export interface IRawChatParticipantContribution {
 	id: string;
 	name: string;
@@ -24,6 +39,7 @@ export interface IRawChatParticipantContribution {
 	isSticky?: boolean;
 	sampleRequest?: string;
 	commands?: IRawChatCommandContribution[];
+	capabilities?: IRawChatAttachmentCapabilitiesContribution;
 	locations?: RawChatParticipantLocation[];
 	/**
 	 * Valid for default participants in 'panel' location

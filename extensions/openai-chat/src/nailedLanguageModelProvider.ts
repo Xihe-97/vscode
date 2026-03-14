@@ -11,23 +11,22 @@ export class NailedLanguageModelChatProvider implements vscode.LanguageModelChat
 
 	private readonly transport: NailedResponsesTransport;
 
-	constructor(private readonly config: ProviderConfig) {
-		this.transport = new NailedResponsesTransport(config);
+	constructor(private readonly getConfig: () => Promise<ProviderConfig>) {
+		this.transport = new NailedResponsesTransport(getConfig);
 	}
 
-	provideLanguageModelChatInformation(): vscode.ProviderResult<vscode.LanguageModelChatInformation[]> {
+	async provideLanguageModelChatInformation(): Promise<vscode.LanguageModelChatInformation[]> {
+		const config = await this.getConfig();
 		return [{
-			id: this.config.model,
-			name: this.config.model,
-			family: this.config.model,
+			id: config.model,
+			name: config.model,
+			family: config.model,
 			version: 'nailed',
-			maxInputTokens: this.config.maxInputTokens,
-			maxOutputTokens: this.config.maxInputTokens,
+			maxInputTokens: config.maxInputTokens,
+			maxOutputTokens: config.maxInputTokens,
 			isDefault: true,
 			isUserSelectable: true,
-			capabilities: {
-				toolCalling: true,
-			},
+			capabilities: { toolCalling: true, imageInput: true },
 		}];
 	}
 
@@ -38,7 +37,8 @@ export class NailedLanguageModelChatProvider implements vscode.LanguageModelChat
 		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
 		token: vscode.CancellationToken,
 	): Promise<void> {
-		if (model.id !== this.config.model) {
+		const config = await this.getConfig();
+		if (model.id !== config.model) {
 			throw vscode.LanguageModelError.NotFound(`Unknown model: ${model.id}`);
 		}
 		await this.transport.provideChatResponse(messages, options, progress, token);

@@ -6,18 +6,22 @@
 import * as vscode from 'vscode';
 import { createNailedChatParticipant } from './nailedChatParticipant';
 import { NailedLanguageModelChatProvider } from './nailedLanguageModelProvider';
-import { loadProviderConfig } from './providerConfig';
+import { loadProviderConfig, NAILED_VENDOR } from './providerConfig';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-	try {
-		const config = await loadProviderConfig();
-		const provider = new NailedLanguageModelChatProvider(config);
-		context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider(config.vendor, provider));
-		context.subscriptions.push(createNailedChatParticipant(config));
-	} catch (error) {
+	let configPromise: Promise<Awaited<ReturnType<typeof loadProviderConfig>>> | undefined;
+	const getConfig = () => {
+		configPromise ??= loadProviderConfig();
+		return configPromise;
+	};
+
+	context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider(NAILED_VENDOR, new NailedLanguageModelChatProvider(getConfig)));
+	context.subscriptions.push(createNailedChatParticipant(getConfig));
+
+	void getConfig().catch(error => {
 		const message = error instanceof Error ? error.message : vscode.l10n.t('Failed to initialize the configured provider.');
 		void vscode.window.showErrorMessage(vscode.l10n.t('OpenAI Chat initialization failed: {0}', message));
-	}
+	});
 }
 
 export function deactivate(): void {
